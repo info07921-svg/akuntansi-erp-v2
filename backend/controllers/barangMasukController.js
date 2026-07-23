@@ -1,6 +1,6 @@
 const db = require("../config/database");
 const PDFDocument = require("pdfkit");
-const { createJurnal } = require("../utils/jurnalHelper");
+const { createJurnal } = require("../utils/jurnalhelper");
 
 // ==========================================================================
 // 1. CREATE BARANG MASUK (MENGGUNAKAN INDIKATOR ANGKA 0/1 SESUAI DB ANDA)
