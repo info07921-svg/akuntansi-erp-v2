@@ -1,7 +1,7 @@
 const PDFDocument = require("pdfkit");
 const ExcelJS = require("exceljs");
 const db = require("../config/database");
-const { createJurnal } = require("../utils/jurnalHelper");
+const { createJurnal } = require("../utils/jurnalhelper");
 const { auditLog } = require("../utils/auditLog");
 const { getPPNAktif } = require("../helpers/pajakHelper"); // Digunakan jika ada, atau fallback ke setting_aplikasi
 
