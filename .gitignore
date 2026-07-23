@@ -1,0 +1,15 @@
+backend/node_modules/
+frontend/node_modules/
+
+backend/.env
+frontend/.env
+
+*.log
+
+dist/
+build/
+
+tauri/target/
+
+.DS_Store
+Thumbs.db

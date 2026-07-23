@@ -1,0 +1,24 @@
+/* ===================================================
+   TAURI GLOBAL RESET - WAJIB UNTUK MENGHILANGKAN SCROLL
+=================================================== */
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color-scheme: light;
+}
+
+/* Mengunci canvas window Tauri agar tidak bisa bergeser/bocor */
+html, 
+body, 
+#root {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important; /* Mematikan scrollbar sistem desktop */
+  background-color: #ffffff;
+  
+  /* Membuat aplikasi terasa seperti native desktop app */
+  user-select: none; 
+  -webkit-user-select: none;
+}

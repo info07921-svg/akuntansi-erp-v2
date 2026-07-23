@@ -1,0 +1,46 @@
+/* ===================================================
+   TAURI CONTENT ISOLATION LAYOUT - ANTI LEAK SCROLL
+=================================================== */
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #f8fafc;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  overflow: hidden; /* Mengunci total jendela luar desktop */
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Container Utama Pembungkus Aplikasi */
+.app-layout {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+/* Panel Konten Utama di Samping Sidebar */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-left: 260px; /* Lebar presisi menyesuaikan sidebar */
+  height: 100vh;
+  overflow: hidden; /* Mencegah overflow merusak layout atas */
+}
+
+/* Area Tempat Halaman (Dashboard, dll) Dimuat */
+.page-content {
+  flex: 1;
+  width: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow-y: auto; /* GERBANG UTAMA: Scroll internal aktif penuh di sini jika konten panjang */
+  background: #f8fafc;
+}
