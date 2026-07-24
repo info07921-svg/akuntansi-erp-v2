@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:3000/api",
+  baseURL: "http://akuntansi-erp-v2-production.up.railway.app",
 });
 
 // REQUEST INTERCEPTOR — selipkan token di setiap request
