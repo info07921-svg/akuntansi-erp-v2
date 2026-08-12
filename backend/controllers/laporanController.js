@@ -49,6 +49,7 @@ exports.exportNeracaSaldo = async (req, res) => {
 };
 
 // 2. Export / Query Buku Besar (Dukungan Tampil Semua Akun Maupun Spesifik Akun)
+// Laporan Buku Besar (Support Kode Akun Prefix 141001 / 111001)
 exports.bukuBesar = async (req, res) => {
   try {
     const akun_id = req.params.akun_id || req.query.akun_id;
@@ -58,7 +59,7 @@ exports.bukuBesar = async (req, res) => {
     let sqlParams = [];
     let sqlWhere = [];
 
-    // Filter berdasarkan tenant/perusahaan
+    // Filter Perusahaan
     if (perusahaan_id) {
       sqlWhere.push("(j.perusahaan_id = ? OR j.perusahaan_id IS NULL)");
       sqlParams.push(perusahaan_id);
@@ -67,7 +68,7 @@ exports.bukuBesar = async (req, res) => {
     let tipeAkun = "";
     let infoAkun = null;
 
-    // Jika user memilih 1 akun spesifik
+    // Jika user memilih spesifik 1 akun
     if (akun_id && akun_id !== "") {
       const [akun] = await db.query(
         `SELECT * FROM akun WHERE (id = ? OR kode_akun = ?) AND (perusahaan_id = ? OR perusahaan_id IS NULL)`,
@@ -82,7 +83,7 @@ exports.bukuBesar = async (req, res) => {
       }
     }
 
-    // Filter berdasarkan rentang tanggal
+    // Filter Rentang Tanggal
     if (tanggal_awal) {
       sqlWhere.push("j.tanggal >= ?");
       sqlParams.push(`${tanggal_awal} 00:00:00`);
@@ -95,7 +96,7 @@ exports.bukuBesar = async (req, res) => {
 
     const whereClause = sqlWhere.length > 0 ? `WHERE ${sqlWhere.join(" AND ")}` : "";
 
-    // Query Utama Mutasi Jurnal
+    // Query Detail Jurnal Mutasi
     const [rows] = await db.query(
       `SELECT 
         j.tanggal,
@@ -119,9 +120,10 @@ exports.bukuBesar = async (req, res) => {
     const formattedData = rows.map(item => {
       const debitVal = Number(item.debit) || 0;
       const kreditVal = Number(item.kredit) || 0;
-      const currentTipe = String(item.tipe_akun || tipeAkun).toUpperCase();
+      const itemTipe = String(item.tipe_akun || tipeAkun || "").toUpperCase();
 
-      if (["KAS", "BANK", "ASET", "BEBAN"].includes(currentTipe)) {
+      // Akun Kas, Bank, Aset, Beban bertambah di Debit
+      if (["KAS", "BANK", "ASET", "BEBAN"].includes(itemTipe) || item.kode_akun.startsWith("141") || item.kode_akun.startsWith("111")) {
         saldo += (debitVal - kreditVal);
       } else {
         saldo += (kreditVal - debitVal);
