@@ -1,0 +1,101 @@
+/* ===================================================
+   ERP ENTERPRISE - MODERN WHITE HEADER DESIGN
+=================================================== */
+
+.header {
+  height: 70px;
+  width: 100%;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 32px;
+  box-sizing: border-box;
+}
+
+.header-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #64748b; /* Dibuat kalem agar tidak merusak fokus ke judul halaman */
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+/* Kotak Pencarian Modern */
+.search-box {
+  width: 240px;
+  height: 38px;
+  background: #f1f5f9;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-size: 13px;
+  color: #0f172a;
+  transition: all 0.2s ease;
+}
+
+.search-box:focus {
+  outline: none;
+  background: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 4px rgba(2, 132, 199, 0.08);
+}
+
+/* Kotak Profil & Menu Dropdown */
+.header .user-box {
+  position: relative;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.header .user-box:hover {
+  background: #f1f5f9;
+}
+
+/* Menu Dropdown Logout Keluar */
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 140px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  z-index: 200;
+}
+
+.dropdown-item {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+}
+
+.dropdown-item.logout {
+  color: #dc2626;
+}
+
+.dropdown-item.logout:hover {
+  background: #fef2f2;
+}
