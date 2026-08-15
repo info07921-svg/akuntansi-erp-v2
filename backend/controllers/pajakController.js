@@ -1,11 +1,10 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// Helper Ekstraksi Fleksibel: Aman membaca perusahaan_id dari berbagai bentuk req.user
+// Helper Ekstraksi Ketat: Tidak menggunakan default 1 agar tidak bocor ke user lain
 const getPerusahaanId = (req) => {
-  if (!req.user) return 1;
+  if (!req || !req.user) return null;
 
-  // Cek berlapis untuk menemukan perusahaan_id atau id user
   const u = req.user.user || req.user.data || req.user;
 
   if (u.perusahaan_id !== undefined && u.perusahaan_id !== null) {
@@ -14,20 +13,16 @@ const getPerusahaanId = (req) => {
   if (u.id_perusahaan !== undefined && u.id_perusahaan !== null) {
     return parseInt(u.id_perusahaan, 10);
   }
-  if (u.id !== undefined && u.id !== null) {
-    return parseInt(u.id, 10);
-  }
 
-  return 1; // Default fallback aman agar tidak memunculkan error 401
+  return null; // Mengembalikan null jika token tidak valid/kosong
 };
 
-// 1. Ambil semua data pajak HANYA milik perusahaan user login
 // 1. Ambil semua data pajak HANYA milik perusahaan user login
 exports.getAll = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
     
-    // Jika tidak ada perusahaanId valid, kembalikan array kosong (jangan tampilkan data global/perusahaan 1)
+    // Jika tidak ada perusahaanId valid, kembalikan array kosong (mencegah kebocoran data)
     if (!perusahaanId) {
       return res.json([]);
     }
@@ -42,12 +37,16 @@ exports.getAll = async (req, res) => {
     return res.status(500).json([]);
   }
 };
+
 // 2. Buat pengaturan pajak baru dengan perusahaan_id asli user yang login
 exports.create = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
-    const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
+    if (!perusahaanId) {
+      return res.status(400).json({ success: false, error: "ID Perusahaan tidak ditemukan pada token login Anda." });
+    }
 
+    const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
     const valNama = nama_pajak || "PPN";
     const valTarif = parseFloat(tarif || persentase || 11) || 11;
     
@@ -81,13 +80,15 @@ exports.setAktif = async (req, res) => {
     const { id } = req.params;
     const perusahaanId = getPerusahaanId(req);
 
-    // 1. Matikan semua pajak milik perusahaan ini
+    if (!perusahaanId) {
+      return res.status(400).json({ success: false, error: "ID Perusahaan tidak valid." });
+    }
+
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 0 WHERE perusahaan_id = ?",
       [perusahaanId]
     );
     
-    // 2. Aktifkan pajak terpilih milik perusahaan ini
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 1 WHERE id = ? AND perusahaan_id = ?",
       [id, perusahaanId]
@@ -107,6 +108,9 @@ exports.setAktif = async (req, res) => {
 exports.getPPNAktif = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
+    if (!perusahaanId) {
+      return res.json({ success: true, data: { tarif: 11, nama_pajak: "PPN 11%", aktif: 1 } });
+    }
 
     const [rows] = await db.query(
       "SELECT * FROM pengaturan_pajak WHERE aktif = 1 AND perusahaan_id = ? ORDER BY id DESC LIMIT 1",
