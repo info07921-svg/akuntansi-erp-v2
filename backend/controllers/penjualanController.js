@@ -3,8 +3,17 @@ const ExcelJS = require("exceljs");
 const db = require("../config/database");
 const { createJurnal } = require("../utils/jurnalhelper");
 const { auditLog } = require("../utils/auditLog");
-const { getPPNAktif } = require("../helpers/pajakHelper");
 
+// Memanggil helper pajak secara aman
+let getPPNAktif = async () => ({ tarif: 11, status: "AKTIF" });
+try {
+  const pajakHelper = require("../helpers/pajakHelper");
+  if (pajakHelper && pajakHelper.getPPNAktif) {
+    getPPNAktif = pajakHelper.getPPNAktif;
+  }
+} catch (e) {
+  console.log("Menjalankan fallback PPN 11%");
+}
 // ==========================================================================
 // 1. FITUR: TAMBAH PENJUALAN BARU
 // ==========================================================================
