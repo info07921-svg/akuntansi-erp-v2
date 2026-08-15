@@ -5,7 +5,8 @@ const pajakController = require("../controllers/pajakController");
 
 router.get("/", pajakController.getAll);
 router.post("/", pajakController.create);
-router.get("/aktif", pajakController.getAktif);
-router.put("/aktifkan/:id", pajakController.setAktif); // Rute baru
+// FIX: Disamakan nama fungsinya dengan getPPNAktif di controller
+router.get("/aktif", pajakController.getPPNAktif);
+router.put("/aktifkan/:id", pajakController.setAktif);
 
 module.exports = router;
