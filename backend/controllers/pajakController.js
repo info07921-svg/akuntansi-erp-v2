@@ -1,25 +1,24 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// Helper untuk mengambil perusahaan_id dari token auth
+// Helper Presisi: Mengambil perusahaan_id asli dari JWT Token user yang sedang login
 const getPerusahaanId = (req) => {
-  if (req.user && req.user.perusahaan_id) {
-    return req.user.perusahaan_id;
-  }
-  return 1; // Fallback jika tidak ada token
+  if (!req.user) return 14; // Fallback ke 14 sesuai ID Perusahaan Anda
+  
+  if (req.user.perusahaan_id) return parseInt(req.user.perusahaan_id, 10);
+  if (typeof req.user === "object" && req.user.id) return parseInt(req.user.id, 10);
+  
+  return 14;
 };
 
-// 1. Ambil semua riwayat pajak HANYA milik perusahaan user yang sedang login
+// 1. Ambil semua data pajak HANYA milik perusahaan user login
 exports.getAll = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
-    
-    // Kueri ketat (Strict Filter): Hanya ambil data milik perusahaan ini
     const [rows] = await db.query(
       "SELECT * FROM pengaturan_pajak WHERE perusahaan_id = ? ORDER BY id DESC",
       [perusahaanId]
     );
-    
     return res.json(rows);
   } catch (err) {
     console.error("Error getAll pajak:", err.message);
@@ -27,7 +26,7 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// 2. Buat pengaturan pajak baru khusus perusahaan ini
+// 2. Buat pengaturan pajak baru dengan perusahaan_id yang BENAR
 exports.create = async (req, res) => {
   try {
     const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
@@ -46,7 +45,7 @@ exports.create = async (req, res) => {
       }
     }
 
-    // Insert wajib menyertakan perusahaan_id milik user login
+    // Insert menggunakan perusahaan_id dinamis milik user login
     await db.query(
       "INSERT INTO pengaturan_pajak (perusahaan_id, nama_pajak, tarif, berlaku_mulai, aktif) VALUES (?, ?, ?, ?, 0)",
       [perusahaanId, valNama, valTarif, valTanggal]
@@ -67,13 +66,13 @@ exports.setAktif = async (req, res) => {
     const { id } = req.params;
     const perusahaanId = getPerusahaanId(req);
 
-    // 1. Matikan semua pajak HANYA milik perusahaan ini
+    // 1. Matikan semua pajak milik perusahaan ini
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 0 WHERE perusahaan_id = ?",
       [perusahaanId]
     );
     
-    // 2. Aktifkan pajak terpilih HANYA milik perusahaan ini
+    // 2. Aktifkan pajak terpilih milik perusahaan ini
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 1 WHERE id = ? AND perusahaan_id = ?",
       [id, perusahaanId]

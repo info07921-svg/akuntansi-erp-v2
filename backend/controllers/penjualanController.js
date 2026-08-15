@@ -65,17 +65,20 @@ exports.createPenjualan = async (req, res) => {
       totalLaba += (hargaJualAktif - hargaBeliAktif) * Number(item.qty);
     }
 
-    let tarifPPN = 11;
-    try {
-      const pajakAktif = await getPPNAktif(conn);
-      if (pajakAktif && pajakAktif.tarif) tarifPPN = Number(pajakAktif.tarif);
-    } catch (e) {
-      const [settingPajak] = await conn.query(
-        "SELECT tarif_ppn FROM setting_aplikasi WHERE perusahaan_id = ? LIMIT 1", 
-        [perusahaan_id]
-      );
-      if (settingPajak && settingPajak.length > 0) tarifPPN = Number(settingPajak[0].tarif_ppn);
-    }
+    // KODE BARU (Sudah mengirim perusahaan_id)
+let tarifPPN = 11;
+try {
+  const pajakAktif = await getPPNAktif(conn, perusahaan_id);
+  if (pajakAktif && pajakAktif.tarif !== undefined) {
+    tarifPPN = Number(pajakAktif.tarif);
+  }
+} catch (e) {
+  const [settingPajak] = await conn.query(
+    "SELECT tarif_ppn FROM setting_aplikasi WHERE perusahaan_id = ? LIMIT 1", 
+    [perusahaan_id]
+  );
+  if (settingPajak && settingPajak.length > 0) tarifPPN = Number(settingPajak[0].tarif_ppn);
+}
 
     const totalPajak = (subtotal * tarifPPN) / 100;
     const grandTotal = subtotal + totalPajak;
