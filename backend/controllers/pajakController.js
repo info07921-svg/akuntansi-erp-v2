@@ -1,62 +1,75 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// Ambil semua riwayat pajak
+// 1. Ambil semua daftar pajak (Tabel: pajak)
 exports.getAll = async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM pengaturan_pajak ORDER BY berlaku_mulai DESC");
-    res.json(rows);
+    const { perusahaan_id } = req.user || { perusahaan_id: 1 };
+    const [rows] = await db.query(
+      "SELECT * FROM pajak WHERE (perusahaan_id = ? OR perusahaan_id IS NULL) ORDER BY id DESC",
+      [perusahaan_id]
+    );
+    return res.json({ success: true, data: rows });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Buat pengaturan pajak baru
+// 2. Buat pengaturan pajak baru
 exports.create = async (req, res) => {
   try {
     const { nama_pajak, tarif, berlaku_mulai } = req.body;
+    const { perusahaan_id } = req.user || { perusahaan_id: 1 };
+
     await db.query(
-      "INSERT INTO pengaturan_pajak (nama_pajak, tarif, berlaku_mulai, aktif) VALUES (?, ?, ?, 0)",
-      [nama_pajak, tarif, berlaku_mulai]
+      "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, status) VALUES (?, ?, ?, 'NON-AKTIF')",
+      [perusahaan_id, nama_pajak, tarif]
     );
-    res.json({ success: true, message: "Pengaturan pajak berhasil ditambahkan" });
+    return res.json({ success: true, message: "Pengaturan pajak berhasil ditambahkan" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// Fungsi untuk Mengaktifkan Pajak (Set Aktif = 1, sisanya 0)
+// 3. Mengaktifkan Pajak PPN (Set status = 'AKTIF' untuk yang dipilih, sisanya 'NON-AKTIF')
 exports.setAktif = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
     const { id } = req.params;
+    const { perusahaan_id } = req.user || { perusahaan_id: 1 };
 
-    // 1. Matikan semua pajak
-    await conn.query("UPDATE pengaturan_pajak SET aktif = 0");
-    // 2. Aktifkan yang dipilih
-    await conn.query("UPDATE pengaturan_pajak SET aktif = 1 WHERE id = ?", [id]);
+    // Matikan status semua pajak milik perusahaan
+    await conn.query(
+      "UPDATE pajak SET status = 'NON-AKTIF' WHERE (perusahaan_id = ? OR perusahaan_id IS NULL)",
+      [perusahaan_id]
+    );
+
+    // Aktifkan pajak yang dipilih
+    await conn.query(
+      "UPDATE pajak SET status = 'AKTIF' WHERE id = ? AND (perusahaan_id = ? OR perusahaan_id IS NULL)",
+      [id, perusahaan_id]
+    );
 
     await conn.commit();
-    res.json({ success: true, message: "Pajak aktif berhasil diperbarui" });
+    return res.json({ success: true, message: "Status PPN Aktif berhasil diperbarui" });
   } catch (err) {
     await conn.rollback();
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   } finally {
     conn.release();
   }
 };
 
-// Ambil Pajak Aktif
+// 4. Ambil 1 Pajak PPN Aktif untuk Frontend / Transaksi
 exports.getPPNAktif = async (req, res) => {
   try {
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
 
-    // Ambil hanya 1 record pajak PPN yang berstatus AKTIF milik perusahaan
     const [rows] = await db.query(
       `SELECT * FROM pajak 
        WHERE (perusahaan_id = ? OR perusahaan_id IS NULL) 
-         AND (UPPER(status) = 'AKTIF' OR is_active = 1)
+         AND (UPPER(status) = 'AKTIF' OR status = '1')
        ORDER BY id DESC LIMIT 1`,
       [perusahaan_id]
     );
@@ -67,6 +80,6 @@ exports.getPPNAktif = async (req, res) => {
 
     return res.json({ success: true, data: rows[0] });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
