@@ -22,10 +22,16 @@ const getPerusahaanId = (req) => {
 };
 
 // 1. Ambil semua data pajak HANYA milik perusahaan user login
+// 1. Ambil semua data pajak HANYA milik perusahaan user login
 exports.getAll = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
     
+    // Jika tidak ada perusahaanId valid, kembalikan array kosong (jangan tampilkan data global/perusahaan 1)
+    if (!perusahaanId) {
+      return res.json([]);
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM pengaturan_pajak WHERE perusahaan_id = ? ORDER BY id DESC",
       [perusahaanId]
@@ -36,7 +42,6 @@ exports.getAll = async (req, res) => {
     return res.status(500).json([]);
   }
 };
-
 // 2. Buat pengaturan pajak baru dengan perusahaan_id asli user yang login
 exports.create = async (req, res) => {
   try {
