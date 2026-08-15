@@ -47,15 +47,26 @@ exports.setAktif = async (req, res) => {
   }
 };
 
-// Ambil pajak yang saat ini aktif
-exports.getAktif = async (req, res) => {
+// Ambil Pajak Aktif
+exports.getPPNAktif = async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM pengaturan_pajak WHERE aktif = 1 LIMIT 1");
+    const { perusahaan_id } = req.user || { perusahaan_id: 1 };
+
+    // Ambil hanya 1 record pajak PPN yang berstatus AKTIF milik perusahaan
+    const [rows] = await db.query(
+      `SELECT * FROM pajak 
+       WHERE (perusahaan_id = ? OR perusahaan_id IS NULL) 
+         AND (UPPER(status) = 'AKTIF' OR is_active = 1)
+       ORDER BY id DESC LIMIT 1`,
+      [perusahaan_id]
+    );
+
     if (rows.length === 0) {
-      return res.json({ nama_pajak: "PPN", tarif: 11 }); // Fallback
+      return res.json({ success: true, data: { tarif: 11, nama_pajak: "PPN 11%", status: "AKTIF" } });
     }
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+
+    return res.json({ success: true, data: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };

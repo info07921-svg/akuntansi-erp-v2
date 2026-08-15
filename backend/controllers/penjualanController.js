@@ -3,10 +3,10 @@ const ExcelJS = require("exceljs");
 const db = require("../config/database");
 const { createJurnal } = require("../utils/jurnalhelper");
 const { auditLog } = require("../utils/auditLog");
-const { getPPNAktif } = require("../helpers/pajakHelper"); // Digunakan jika ada, atau fallback ke setting_aplikasi
+const { getPPNAktif } = require("../helpers/pajakHelper");
 
 // ==========================================================================
-// 1. FITUR: TAMBAH PENJUALAN BARU (COMPREHENSIVE MULTI-COMPANY & STOCK CARD)
+// 1. FITUR: TAMBAH PENJUALAN BARU
 // ==========================================================================
 exports.createPenjualan = async (req, res) => {
   const conn = await db.getConnection();
@@ -15,7 +15,6 @@ exports.createPenjualan = async (req, res) => {
 
     const { customer_id, metode_pembayaran, status_pembayaran, jatuh_tempo, items } = req.body;
     
-    // ✅ Sanitasi user_id dan perusahaan_id
     const perusahaan_id = req.user?.perusahaan_id || 1;
     let user_id = req.user?.id || req.user?.user_id || req.user;
 
@@ -32,7 +31,6 @@ exports.createPenjualan = async (req, res) => {
     let subtotal = 0;
     let totalLaba = 0;
 
-    // --- VALIDASI STOK, STATUS, & KALKULASI LABA ---
     for (const item of items) {
       const [barang] = await conn.query(
         "SELECT * FROM barang WHERE id = ? AND perusahaan_id = ?", 
@@ -51,7 +49,6 @@ exports.createPenjualan = async (req, res) => {
         throw new Error(`Stok untuk barang ${dataBarang.nama_barang} tidak mencukupi.`);
       }
 
-      // Menggunakan harga_jual dari input transaksi (atau fallback ke master data barang jika kosong)
       const hargaJualAktif = Number(item.harga_jual || dataBarang.harga_jual);
       const hargaBeliAktif = Number(dataBarang.harga_beli || 0);
 
@@ -59,38 +56,26 @@ exports.createPenjualan = async (req, res) => {
       totalLaba += (hargaJualAktif - hargaBeliAktif) * Number(item.qty);
     }
 
-    // --- HITUNG PAJAK (PPN) ---
-    let tarifPPN = 11; // Default fallback
+    let tarifPPN = 11;
     try {
       const pajakAktif = await getPPNAktif(conn);
       if (pajakAktif && pajakAktif.tarif) tarifPPN = Number(pajakAktif.tarif);
     } catch (e) {
-      // Fallback ke table setting jika helper pajak tidak tersedia
-      await conn.query(`
-        CREATE TABLE IF NOT EXISTS \`setting_aplikasi\` (
-          \`id\` int(11) NOT NULL AUTO_INCREMENT,
-          \`perusahaan_id\` int(11) DEFAULT NULL,
-          \`tarif_ppn\` decimal(5,2) DEFAULT '11.00',
-          PRIMARY KEY (\`id\`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-      `);
       const [settingPajak] = await conn.query(
         "SELECT tarif_ppn FROM setting_aplikasi WHERE perusahaan_id = ? LIMIT 1", 
         [perusahaan_id]
       );
-      if (settingPajak.length > 0) tarifPPN = Number(settingPajak[0].tarif_ppn);
+      if (settingPajak && settingPajak.length > 0) tarifPPN = Number(settingPajak[0].tarif_ppn);
     }
 
     const totalPajak = (subtotal * tarifPPN) / 100;
     const grandTotal = subtotal + totalPajak;
 
-    // Normalisasi metode & status bayar
     const isKredit = String(metode_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran) === "0";
     const numericStatusBayar = isKredit ? 0 : 1;
     const stringMetodeBayar = isKredit ? "KREDIT" : (metode_pembayaran || "TUNAI");
     const cleanCustomerId = (customer_id && customer_id !== "0" && customer_id !== "") ? customer_id : null;
 
-    // --- 1. INSERT INTO PENJUALAN ---
     const [resultPenjualan] = await conn.query(
       `INSERT INTO penjualan (perusahaan_id, invoice, customer_id, tanggal, dpp, subtotal, ppn_persen, ppn, total, metode_pembayaran, status_pembayaran, jatuh_tempo, status_transaksi) 
        VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED')`,
@@ -99,7 +84,6 @@ exports.createPenjualan = async (req, res) => {
  
     const penjualanId = resultPenjualan.insertId;
 
-    // --- 2. INSERT DETAIL PENJUALAN & MUTASI STOK + HISTORI CARD ---
     for (const item of items) {
       const [barang] = await conn.query("SELECT * FROM barang WHERE id = ?", [item.barang_id]);
       const dataBarang = barang[0];
@@ -112,10 +96,9 @@ exports.createPenjualan = async (req, res) => {
       await conn.query(
         `INSERT INTO detail_penjualan (penjualan_id, barang_id, qty, harga_beli, harga_jual, subtotal, laba) 
          VALUES (?, ?, ?, ?, ?, ?, ? )`,
-        [penjualanId, item.barang_id, item.qty, hargaBeliAktif, hargaJualAktif, itemSubtotal, itemSubtotal, itemLaba]
+        [penjualanId, item.barang_id, item.qty, hargaBeliAktif, hargaJualAktif, itemSubtotal, itemLaba]
       );
 
-      // Potong Stok Utama
       const stokSebelum = Number(dataBarang.stok);
       const stokSesudah = stokSebelum - Number(item.qty);
 
@@ -124,14 +107,12 @@ exports.createPenjualan = async (req, res) => {
         [stokSesudah, item.barang_id, perusahaan_id]
       );
 
-      // Record Histori Stok (Stock Card Log)
       await conn.query(
         `INSERT INTO histori_stok (barang_id, tipe, qty, stok_sebelum, stok_sesudah, keterangan) VALUES (?, 'KELUAR', ?, ?, ?, ?)`,
         [item.barang_id, item.qty, stokSebelum, stokSesudah, `Penjualan Invoice ${invoice}`]
       );
     }
 
-    // --- 3. INSERT INTO PIUTANG (Jika Kredit) ---
     if (isKredit) {
       await conn.query(
         `INSERT INTO piutang (penjualan_id, customer_id, total_piutang, sisa_piutang, status, jatuh_tempo) 
@@ -140,31 +121,30 @@ exports.createPenjualan = async (req, res) => {
       );
     }
 
-    // --- 4. OTOMATISASI ENTRI JURNAL AKUNTANSI ---
+    // OTOMATISASI JURNAL DENGAN PENCARIAN FLEKSIBELL KODE AKUN
     if (typeof createJurnal === "function") {
-      // Struktur adaptif menggunakan akun_id & kode_akun agar aman pada versi helper manapun
-      const [rowsKAs] = await conn.query(
-        "SELECT id, kode_akun FROM akun WHERE tipe = 'KAS' AND nama_akun = 'Kas Utama & Bank' AND perusahaan_id = ?",
+      const [rowsKas] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (tipe = 'KAS' OR kode_akun LIKE '141%' OR kode_akun LIKE '111%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
         [perusahaan_id]);
       const [rowsPendapatan] = await conn.query(
-        "SELECT id, kode_akun FROM akun WHERE tipe = 'PENDAPATAN' AND nama_akun = 'Pendapatan Penjualan' AND perusahaan_id = ?",
+        "SELECT id, kode_akun FROM akun WHERE (tipe = 'PENDAPATAN' OR kode_akun LIKE '144%' OR kode_akun LIKE '411%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
         [perusahaan_id]);
       const [rowsPiutang] = await conn.query(
-        "SELECT id, kode_akun FROM akun WHERE tipe = 'ASET' AND nama_akun = 'Piutang Usaha' AND perusahaan_id = ?",
+        "SELECT id, kode_akun FROM akun WHERE (nama_akun LIKE '%Piutang%' OR kode_akun LIKE '1411%' OR kode_akun LIKE '1112%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
         [perusahaan_id]);
 
-      const akunKas = rowsKAs[0] || { id: 35, kode_akun: "101001" };
-      const akunPendapatan = rowsPendapatan[0] || { id: 41, kode_akun: "104001" };
-      const akunPiutang = rowsPiutang[0] || { id: 36, kode_akun: "101101" };
+      const akunKas = rowsKas[0] || { id: 1, kode_akun: "141001" };
+      const akunPendapatan = rowsPendapatan[0] || { id: 2, kode_akun: "144001" };
+      const akunPiutang = rowsPiutang[0] || { id: 3, kode_akun: "141101" };
 
       const akunJurnalRows = !isKredit
         ? [
-          {akun_id: akunKas.id, kode_akun: akunKas.kode_akun, debit: grandTotal, kredit: 0},
-          {akun_id: akunPendapatan.id, kode_akun: akunPendapatan.kode_akun, debit: 0, kredit: grandTotal }
+          { akun_id: akunKas.id, kode_akun: akunKas.kode_akun, debit: grandTotal, kredit: 0 },
+          { akun_id: akunPendapatan.id, kode_akun: akunPendapatan.kode_akun, debit: 0, kredit: grandTotal }
         ]
         : [
-          {akun_id: akunPiutang.id, kode_akun: akunPiutang.kode_akun, debit: grandTotal, kredit: 0 },
-          {akun_id: akunPendapatan.id, kode_akun: akunPendapatan.kode_akun, debit: 0, kredit: grandTotal }
+          { akun_id: akunPiutang.id, kode_akun: akunPiutang.kode_akun, debit: grandTotal, kredit: 0 },
+          { akun_id: akunPendapatan.id, kode_akun: akunPendapatan.kode_akun, debit: 0, kredit: grandTotal }
         ];
 
       await createJurnal(conn, {
@@ -176,7 +156,6 @@ exports.createPenjualan = async (req, res) => {
       });
     }
 
-    // --- 5. LOG AUDIT SYSTEM TRAIL ---
     if (typeof auditLog === "function") {
       await auditLog(conn, user_id, "CREATE", "penjualan", penjualanId, `Menerbitkan Invoice Penjualan ${invoice} senilai Rp ${grandTotal.toLocaleString('id-ID')}`);
     }
@@ -203,7 +182,77 @@ exports.createPenjualan = async (req, res) => {
 };
 
 // ==========================================================================
-// 2. FITUR: AMBIL SEMUA RIWAYAT INVOICE PENJUALAN
+// 2. FITUR: PEMBATALAN (CANCEL) INVOICE PENJUALAN (HAPUS JURNAL & KEMBALIKAN STOK)
+// ==========================================================================
+exports.cancelPenjualan = async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { id } = req.params;
+    const { perusahaan_id, id: user_id } = req.user || { perusahaan_id: 1, id: 1 };
+
+    const [penjualan] = await conn.query(
+      "SELECT * FROM penjualan WHERE id = ? AND perusahaan_id = ?", 
+      [id, perusahaan_id]
+    );
+    
+    if (penjualan.length === 0) throw new Error("Transaksi tidak ditemukan.");
+
+    const dataPenjualan = penjualan[0];
+    if (dataPenjualan.status_transaksi === "DIBATALKAN") {
+      throw new Error("Transaksi ini sudah berstatus dibatalkan sebelumnya.");
+    }
+
+    const [detail] = await conn.query("SELECT * FROM detail_penjualan WHERE penjualan_id = ?", [id]);
+    
+    // 1. Kembalikan Stok Barang & Catat Histori Card
+    for (const item of detail) {
+      const [barang] = await conn.query("SELECT stok FROM barang WHERE id = ?", [item.barang_id]);
+      if (barang.length > 0) {
+        const stokSebelum = Number(barang[0].stok);
+        const stokSesudah = stokSebelum + Number(item.qty);
+
+        await conn.query(
+          "UPDATE barang SET stok = ? WHERE id = ? AND perusahaan_id = ?", 
+          [stokSesudah, item.barang_id, perusahaan_id]
+        );
+
+        await conn.query(
+          `INSERT INTO histori_stok (barang_id, tipe, qty, stok_sebelum, stok_sesudah, keterangan) VALUES (?, 'MASUK', ?, ?, ?, ?)`,
+          [item.barang_id, item.qty, stokSebelum, stokSesudah, `Cancel Penjualan ${dataPenjualan.invoice}`]
+        );
+      }
+    }
+
+    // 2. Ubah Status Transaksi & Piutang
+    await conn.query("UPDATE penjualan SET status_transaksi = 'DIBATALKAN' WHERE id = ?", [id]);
+    await conn.query("UPDATE piutang SET status = 'DIBATALKAN', sisa_piutang = 0 WHERE penjualan_id = ?", [id]);
+
+    // 3. PERBAIKAN BUG: Hapus Posting Jurnal Transaksi Ini Agar Tidak Mengotori Buku Besar!
+    const [jurnal] = await conn.query(`SELECT id FROM jurnal WHERE ref_tipe = 'PENJUALAN' AND ref_id = ?`, [id]);
+    if (jurnal.length > 0) {
+      for (const j of jurnal) {
+        await conn.query(`DELETE FROM detail_jurnal WHERE jurnal_id = ?`, [j.id]);
+        await conn.query(`DELETE FROM jurnal WHERE id = ?`, [j.id]);
+      }
+    }
+
+    if (typeof auditLog === "function") {
+      await auditLog(conn, user_id, "UPDATE", "penjualan", id, `Membatalkan Invoice Penjualan ${dataPenjualan.invoice}`);
+    }
+
+    await conn.commit();
+    return res.json({ success: true, message: "Transaksi penjualan berhasil dibatalkan dan pos jurnal telah dibersihkan." });
+  } catch (error) {
+    await conn.rollback();
+    return res.status(400).json({ success: false, message: error.message });
+  } finally {
+    conn.release();
+  }
+};
+
+// ==========================================================================
+// 3. FITUR LAINNYA (RIWAYAT, DETAIL, BAYAR PIUTANG, DASHBOARD, EXCEL, PDF)
 // ==========================================================================
 exports.getAllPenjualan = async (req, res) => {
   try {
@@ -222,9 +271,6 @@ exports.getAllPenjualan = async (req, res) => {
   }
 };
 
-// ==========================================================================
-// 3. FITUR: AMBIL DETAIL INVOICE PENJUALAN BY ID
-// ==========================================================================
 exports.getDetailPenjualan = async (req, res) => {
   try {
     const { id } = req.params;
@@ -277,102 +323,14 @@ exports.getDetailPenjualan = async (req, res) => {
   }
 };
 
-// ==========================================================================
-// 4. FITUR: PEMBATALAN (CANCEL) INVOICE PENJUALAN & STORNO JURNAL MUTASI
-// ==========================================================================
-exports.cancelPenjualan = async (req, res) => {
-  const conn = await db.getConnection();
-  try {
-    await conn.beginTransaction();
-    const { id } = req.params;
-    const { perusahaan_id, id: user_id } = req.user;
-
-    const [penjualan] = await conn.query(
-      "SELECT * FROM penjualan WHERE id = ? AND perusahaan_id = ?", 
-      [id, perusahaan_id]
-    );
-    
-    if (penjualan.length === 0) throw new Error("Transaksi tidak ditemukan.");
-
-    const dataPenjualan = penjualan[0];
-    if (dataPenjualan.status_transaksi === "DIBATALKAN") {
-      throw new Error("Transaksi ini sudah berstatus dibatalkan sebelumnya.");
-    }
-
-    const [detail] = await conn.query("SELECT * FROM detail_penjualan WHERE penjualan_id = ?", [id]);
-    
-    // Kembalikan Stok & Catat di Kartu Stok Log
-    for (const item of detail) {
-      const [barang] = await conn.query("SELECT stok FROM barang WHERE id = ?", [item.barang_id]);
-      const stokSebelum = Number(barang[0].stok);
-      const stokSesudah = stokSebelum + Number(item.qty);
-
-      await conn.query(
-        "UPDATE barang SET stok = ? WHERE id = ? AND perusahaan_id = ?", 
-        [stokSesudah, item.barang_id, perusahaan_id]
-      );
-
-      await conn.query(
-        `INSERT INTO histori_stok (barang_id, tipe, qty, stok_sebelum, stok_sesudah, keterangan) VALUES (?, 'MASUK', ?, ?, ?, ?)`,
-        [item.barang_id, item.qty, stokSebelum, stokSesudah, `Cancel Penjualan ${dataPenjualan.invoice}`]
-      );
-    }
-
-    await conn.query("UPDATE penjualan SET status_transaksi = 'DIBATALKAN' WHERE id = ?", [id]);
-    await conn.query("UPDATE piutang SET status = 'DIBATALKAN', sisa_piutang = 0 WHERE penjualan_id = ?", [id]);
-
-    // Pembalikan Jurnal Otomatis (Storno)
-    if (typeof createJurnal === "function") {
-      const isKredit = Number(dataPenjualan.status_pembayaran) === 0 || String(dataPenjualan.metode_pembayaran).toUpperCase() === "KREDIT";
-      const subtotalNilai = dataPenjualan.subtotal || dataPenjualan.dpp;
-
-      const stornoRows = !isKredit
-        ? [
-            { akun_id: 1, kode_akun: "1111", debit: 0, kredit: dataPenjualan.total },
-            { akun_id: 4, kode_akun: "4111", debit: subtotalNilai, kredit: 0 },
-            { akun_id: 12, kode_akun: "2112", debit: dataPenjualan.ppn, kredit: 0 }
-          ]
-        : [
-            { akun_id: 2, kode_akun: "1112", debit: 0, kredit: dataPenjualan.total },
-            { akun_id: 4, kode_akun: "4111", debit: subtotalNilai, kredit: 0 },
-            { akun_id: 12, kode_akun: "2112", debit: dataPenjualan.ppn, kredit: 0 }
-          ];
-
-      await createJurnal(conn, {
-        tanggal: new Date(),
-        ref_tipe: "PEMBATALAN_PENJUALAN",
-        ref_id: id,
-        keterangan: `[PEMBATALAN] Penjualan No. ${dataPenjualan.invoice}`,
-        details: stornoRows
-      });
-    }
-
-    if (typeof auditLog === "function") {
-      await auditLog(conn, user_id, "UPDATE", "penjualan", id, `Membatalkan Invoice Penjualan ${dataPenjualan.invoice}`);
-    }
-
-    await conn.commit();
-    return res.json({ success: true, message: "Transaksi penjualan berhasil dibatalkan dan stok dikembalikan." });
-  } catch (error) {
-    await conn.rollback();
-    return res.status(400).json({ success: false, message: error.message });
-  } finally {
-    conn.release();
-  }
-};
-
-// ==========================================================================
-// 5. FITUR: PEMBAYARAN PIUTANG KREDIT BERTAHAP (FIXED SINKRONISASI FRONTEND)
-// ==========================================================================
 exports.bayarPiutang = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-    const { id } = req.params; // Sesuai dengan pembacaan /:id/bayar di frontend
+    const { id } = req.params;
     const { jumlah_bayar, metode_pembayaran, catatan } = req.body;
-    const { id: user_id } = req.user || { id: 1 }; // Fallback jika middleware auth custom
+    const { id: user_id } = req.user || { id: 1 };
 
-    // Validasi input awal dari form submit frontend
     if (!jumlah_bayar || Number(jumlah_bayar) <= 0) {
       return res.status(400).json({ success: false, error: "Jumlah pembayaran harus lebih besar dari 0" });
     }
@@ -392,20 +350,17 @@ exports.bayarPiutang = async (req, res) => {
       return res.status(400).json({ success: false, error: "Jumlah bayar melebihi sisa tagihan piutang aktif." });
     }
 
-    // 1. Insert rekam riwayat cicilan ke database
     await conn.query(
       `INSERT INTO pembayaran_piutang (piutang_id, jumlah_bayar, metode_pembayaran, catatan) VALUES (?, ?, ?, ?)`,
       [id, jumlah_bayar, metode_pembayaran || "TRANSFER", catatan || null]
     );
 
-    // 2. Update saldo sisa tagihan piutang kartu customer
     const statusPiutang = sisaBaru <= 0 ? "LUNAS" : "BELUM_LUNAS";
     await conn.query(
       `UPDATE piutang SET sisa_piutang = ?, status = ? WHERE id = ?`,
       [sisaBaru, statusPiutang, id]
     );
 
-    // 3. Penjurnalan Akuntansi Otomatis
     if (typeof createJurnal === "function") {
       await createJurnal(conn, {
         tanggal: new Date(),
@@ -413,22 +368,17 @@ exports.bayarPiutang = async (req, res) => {
         ref_id: id,
         keterangan: `Pembayaran Piutang #${id} - Ket: ${catatan || 'Tanpa Catatan'}`,
         details: [
-          { akun_id: 1, kode_akun: "1111", debit: Number(jumlah_bayar), kredit: 0 },
-          { akun_id: 2, kode_akun: "1112", debit: 0, kredit: Number(jumlah_bayar) }
+          { akun_id: 1, kode_akun: "141001", debit: Number(jumlah_bayar), kredit: 0 },
+          { akun_id: 3, kode_akun: "141101", debit: 0, kredit: Number(jumlah_bayar) }
         ]
       });
     }
 
-    // 4. Sinkronisasi status master penjualan ke LUNAS jika angsuran terpenuhi penuh
     if (statusPiutang === "LUNAS") {
       await conn.query(
         `UPDATE penjualan SET status_pembayaran = 1, tanggal_pelunasan = NOW() WHERE id = ?`,
         [dataPiutang.penjualan_id]
       );
-    }
-
-    if (typeof auditLog === "function") {
-      await auditLog(conn, user_id, "CREATE", "pembayaran_piutang", id, `Pembayaran Piutang Rp ${Number(jumlah_bayar).toLocaleString("id-ID")}`);
     }
 
     await conn.commit();
@@ -441,22 +391,15 @@ exports.bayarPiutang = async (req, res) => {
 
   } catch (error) {
     await conn.rollback();
-    console.error("Error Bayar Piutang:", error);
-    // Menggunakan properti 'error' agar dibaca alert(err.response?.data?.error) di frontend
     return res.status(500).json({ success: false, error: error.message || "Gagal memproses pembayaran piutang" });
   } finally {
     conn.release();
   }
 };
 
-// ==========================================================================
-// 6. FITUR: AMBIL DATA DAFTAR KARTU PIUTANG (SINKRONISASI MAPPING DATA REACT)
-// ==========================================================================
 exports.getAllPiutang = async (req, res) => {
   try {
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
-    
-    // Query disesuaikan untuk menyuplai properti row.invoice, row.created_at, dan row.total_piutang ke komponen React
     const [rows] = await db.query(
       `SELECT 
         pi.id,
@@ -476,17 +419,12 @@ exports.getAllPiutang = async (req, res) => {
        ORDER BY pi.id DESC`,
       [perusahaan_id]
     );
-    
-    // Langsung kembalikan array rows atau bungkus objek data sesuai format axios di frontend Anda
     return res.json(rows); 
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ==========================================================================
-// 7. FITUR: CETAK FAKTUR INVOICE PDF ELEGAN
-// ==========================================================================
 exports.printInvoice = async (req, res) => {
   try {
     const { id } = req.params;
@@ -518,7 +456,6 @@ exports.printInvoice = async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename="Invoice-${info.invoice}.pdf"`);
     doc.pipe(res);
 
-    // Layout Styling
     doc.rect(0, 0, 595.28, 12).fill("#1e293b");
     doc.font("Helvetica-Bold").fontSize(18).fillColor("#1e3a8a").text(namaPT.toUpperCase(), 40, 35);
     doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(alamatPT, 40, 55, { width: 250 });
@@ -526,7 +463,6 @@ exports.printInvoice = async (req, res) => {
     
     doc.moveTo(40, 85).lineTo(555, 85).lineWidth(1).strokeColor("#e2e8f0").stroke();
 
-    // Metadata
     const topMetadataY = 105;
     doc.font("Helvetica-Bold").fontSize(9).fillColor("#334155").text("DITERBITKAN KEPADA:", 40, topMetadataY);
     doc.font("Helvetica").fillColor("#475569")
@@ -545,7 +481,6 @@ exports.printInvoice = async (req, res) => {
     drawMetaRow("Metode Bayar", textStatusPembayaran);
     drawMetaRow("Status Berkas", info.status_transaksi || "APPROVED");
 
-    // Table Data
     let currentY = 200;
     doc.rect(40, currentY, 515, 22).fill("#f1f5f9");
     doc.font("Helvetica-Bold").fontSize(9).fillColor("#1e293b");
@@ -567,7 +502,6 @@ exports.printInvoice = async (req, res) => {
       currentY += 20;
     });
 
-    // Summary Section
     currentY += 15;
     const drawSummaryRow = (label, value, isBold = false) => {
       doc.font(isBold ? "Helvetica-Bold" : "Helvetica").fillColor(isBold ? "#0f172a" : "#475569");
@@ -582,19 +516,14 @@ exports.printInvoice = async (req, res) => {
     currentY += 6;
     drawSummaryRow("TOTAL NET :", `Rp ${Number(info.total).toLocaleString("id-ID")}`, true);
 
-    // Footer Signature
     doc.font("Helvetica-Oblique").fontSize(8).fillColor("#94a3b8").text("Catatan: Dokumen ini sah dan diproses otomatis melalui ERP System.", 40, 720, { width: 320 });
     doc.font("Helvetica").fontSize(9).fillColor("#334155").text("Bagian Keuangan,", 440, 700, { align: "center", width: 115 });
     doc.end();
   } catch (error) {
-    console.error("PDF Error:", error);
     if (!res.headersSent) res.status(500).send("Gagal memproses berkas PDF.");
   }
 };
 
-// ==========================================================================
-// 8. FITUR: EXPORT LAPORAN PENJUALAN KE EXCEL (SPREADSHEET BLOK)
-// ==========================================================================
 exports.exportPenjualanExcel = async (req, res) => {
   try {
     const { perusahaan_id } = req.user;
@@ -632,9 +561,6 @@ exports.exportPenjualanExcel = async (req, res) => {
   }
 };
 
-// ==========================================================================
-// 9. FITUR: BUSINESS INTELLIGENCE & ERP MONITORING DASHBOARD
-// ==========================================================================
 exports.dashboardERP = async (req, res) => {
   try {
     const { perusahaan_id } = req.user;
@@ -665,19 +591,14 @@ exports.dashboardERP = async (req, res) => {
       kas: valOmset,
       kas_bank: valOmset,
       total_kas: valOmset,
-      
       modal: 0,
       modal_disetor: 0,
-      
       pendapatan: valNet,
       total_pendapatan: valNet,
-      
       beban: 0,
       beban_pengeluaran: 0,
-      
       laba: valLaba,
       laba_bersih: valLaba,
-      
       total_transaksi: penjualan[0].total_transaksi || 0,
       total_penjualan: valOmset
     };
@@ -693,9 +614,6 @@ exports.dashboardERP = async (req, res) => {
   }
 };
 
-// ==========================================================================
-// 10. FITUR: DATA ANALYTICS (GRAFIK HARIAN, BULANAN, TAHUNAN)
-// ==========================================================================
 exports.grafikPenjualan = async (req, res) => {
   try {
     const { perusahaan_id } = req.user;

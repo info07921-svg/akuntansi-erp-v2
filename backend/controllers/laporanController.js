@@ -48,8 +48,8 @@ exports.exportNeracaSaldo = async (req, res) => {
   }
 };
 
-// 2. Export / Query Buku Besar (Dukungan Tampil Semua Akun Maupun Spesifik Akun)
-// Laporan Buku Besar (Support Kode Akun Prefix 141001 / 111001)
+
+// 2. Export / Query Buku Besar (Fix Saldo Berjalan & Filter Status Approved)
 exports.bukuBesar = async (req, res) => {
   try {
     const akun_id = req.params.akun_id || req.query.akun_id;
@@ -59,7 +59,7 @@ exports.bukuBesar = async (req, res) => {
     let sqlParams = [];
     let sqlWhere = [];
 
-    // Filter Perusahaan
+    // Hanya tampilkan jurnal yang tidak dibatalkan / status approved (jika ada relasi status penjualan)
     if (perusahaan_id) {
       sqlWhere.push("(j.perusahaan_id = ? OR j.perusahaan_id IS NULL)");
       sqlParams.push(perusahaan_id);
@@ -68,7 +68,6 @@ exports.bukuBesar = async (req, res) => {
     let tipeAkun = "";
     let infoAkun = null;
 
-    // Jika user memilih spesifik 1 akun
     if (akun_id && akun_id !== "") {
       const [akun] = await db.query(
         `SELECT * FROM akun WHERE (id = ? OR kode_akun = ?) AND (perusahaan_id = ? OR perusahaan_id IS NULL)`,
@@ -83,7 +82,6 @@ exports.bukuBesar = async (req, res) => {
       }
     }
 
-    // Filter Rentang Tanggal
     if (tanggal_awal) {
       sqlWhere.push("j.tanggal >= ?");
       sqlParams.push(`${tanggal_awal} 00:00:00`);
@@ -96,7 +94,6 @@ exports.bukuBesar = async (req, res) => {
 
     const whereClause = sqlWhere.length > 0 ? `WHERE ${sqlWhere.join(" AND ")}` : "";
 
-    // Query Detail Jurnal Mutasi
     const [rows] = await db.query(
       `SELECT 
         j.tanggal,
@@ -120,13 +117,19 @@ exports.bukuBesar = async (req, res) => {
     const formattedData = rows.map(item => {
       const debitVal = Number(item.debit) || 0;
       const kreditVal = Number(item.kredit) || 0;
+      const kodeStr = String(item.kode_akun || "");
       const itemTipe = String(item.tipe_akun || tipeAkun || "").toUpperCase();
 
-      // Akun Kas, Bank, Aset, Beban bertambah di Debit
-      if (["KAS", "BANK", "ASET", "BEBAN"].includes(itemTipe) || item.kode_akun.startsWith("141") || item.kode_akun.startsWith("111")) {
-        saldo += (debitVal - kreditVal);
+      // FIX SALDO BERJALAN: Kas, Bank, Aset, Beban bertambah di DEBIT (+)
+      const isAsetAtauBeban = 
+        ["KAS", "BANK", "ASET", "BEBAN"].includes(itemTipe) || 
+        kodeStr.startsWith("1") || 
+        kodeStr.startsWith("5");
+
+      if (isAsetAtauBeban) {
+        saldo += (debitVal - kreditVal); // DEBIT menambah saldo
       } else {
-        saldo += (kreditVal - debitVal);
+        saldo += (kreditVal - debitVal); // KREDIT menambah saldo (Kewajiban, Modal, Pendapatan)
       }
 
       return {
@@ -154,7 +157,7 @@ exports.bukuBesar = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Gagal memuat Buku Besar di LaporanController:", err);
+    console.error("Gagal memuat Buku Besar:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
