@@ -2,6 +2,7 @@
 const db = require("../config/database");
 
 // 1. Ambil semua daftar pajak (Tabel: pajak)
+// 1. Ambil semua daftar pajak (Versi Langsung Array)
 exports.getAll = async (req, res) => {
   try {
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
@@ -9,9 +10,10 @@ exports.getAll = async (req, res) => {
       "SELECT * FROM pajak WHERE (perusahaan_id = ? OR perusahaan_id IS NULL) ORDER BY id DESC",
       [perusahaan_id]
     );
-    return res.json({ success: true, data: rows });
+    // Return array langsung agar tidak crash saat di-.map() di frontend React
+    return res.json(rows);
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
 
