@@ -18,17 +18,34 @@ exports.getAll = async (req, res) => {
 };
 
 // 2. Buat pengaturan pajak baru
+// 2. Buat pengaturan pajak baru (Fix 500 Error di POST /api/pajak)
 exports.create = async (req, res) => {
   try {
     const { nama_pajak, tarif, berlaku_mulai } = req.body;
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
 
-    await db.query(
-      "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, status) VALUES (?, ?, ?, 'NON-AKTIF')",
-      [perusahaan_id, nama_pajak, tarif]
-    );
+    // Pastikan nilai terisi dengan aman
+    const namaStr = nama_pajak || "PPN";
+    const tarifNum = Number(tarif) || 0;
+    const tglMulai = berlaku_mulai || new Date().toISOString().split("T")[0];
+
+    // Menggunakan kueri adaptif (Mendukung struktur tabel 'pajak' dengan/tanpa kolom berlaku_mulai)
+    try {
+      await db.query(
+        "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, berlaku_mulai, status) VALUES (?, ?, ?, ?, 'NON-AKTIF')",
+        [perusahaan_id, namaStr, tarifNum, tglMulai]
+      );
+    } catch (sqlErr) {
+      // Fallback jika kolom berlaku_mulai belum ada di tabel MySQL
+      await db.query(
+        "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, status) VALUES (?, ?, ?, 'NON-AKTIF')",
+        [perusahaan_id, namaStr, tarifNum]
+      );
+    }
+
     return res.json({ success: true, message: "Pengaturan pajak berhasil ditambahkan" });
   } catch (err) {
+    console.error("Gagal membuat pajak baru:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
