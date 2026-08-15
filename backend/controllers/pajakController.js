@@ -1,8 +1,7 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// 1. Ambil semua daftar pajak (Tabel: pajak)
-// 1. Ambil semua daftar pajak (Versi Langsung Array)
+// 1. Ambil semua daftar pajak (Mendukung Array Langsung untuk Frontend React)
 exports.getAll = async (req, res) => {
   try {
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
@@ -10,47 +9,64 @@ exports.getAll = async (req, res) => {
       "SELECT * FROM pajak WHERE (perusahaan_id = ? OR perusahaan_id IS NULL) ORDER BY id DESC",
       [perusahaan_id]
     );
-    // Return array langsung agar tidak crash saat di-.map() di frontend React
     return res.json(rows);
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error("Error getAll pajak:", err.message);
+    return res.status(500).json([]);
   }
 };
 
-// 2. Buat pengaturan pajak baru
-// 2. Buat pengaturan pajak baru (Fix 500 Error di POST /api/pajak)
+// 2. Buat pengaturan pajak baru (Solusi Baku Error 500 onSubmit)
 exports.create = async (req, res) => {
   try {
-    const { nama_pajak, tarif, berlaku_mulai } = req.body;
+    const { nama_pajak, tarif, persentase, berlaku_mulai, status } = req.body;
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
 
-    // Pastikan nilai terisi dengan aman
-    const namaStr = nama_pajak || "PPN";
-    const tarifNum = Number(tarif) || 0;
-    const tglMulai = berlaku_mulai || new Date().toISOString().split("T")[0];
-
-    // Menggunakan kueri adaptif (Mendukung struktur tabel 'pajak' dengan/tanpa kolom berlaku_mulai)
-    try {
-      await db.query(
-        "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, berlaku_mulai, status) VALUES (?, ?, ?, ?, 'NON-AKTIF')",
-        [perusahaan_id, namaStr, tarifNum, tglMulai]
-      );
-    } catch (sqlErr) {
-      // Fallback jika kolom berlaku_mulai belum ada di tabel MySQL
-      await db.query(
-        "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, status) VALUES (?, ?, ?, 'NON-AKTIF')",
-        [perusahaan_id, namaStr, tarifNum]
-      );
+    // Sanitasi data input agar aman dari NULL / NaN
+    const valNama = nama_pajak || "PPN";
+    const valTarif = parseFloat(tarif || persentase || 0) || 0;
+    
+    // Formatting tanggal ke YYYY-MM-DD
+    let valTanggal = new Date().toISOString().split("T")[0];
+    if (berlaku_mulai) {
+      const parts = berlaku_mulai.split("/");
+      if (parts.length === 3) {
+        valTanggal = `${parts[2]}-${parts[1]}-${parts[0]}`; // Convert DD/MM/YYYY ke YYYY-MM-DD
+      } else {
+        valTanggal = berlaku_mulai;
+      }
     }
 
-    return res.json({ success: true, message: "Pengaturan pajak berhasil ditambahkan" });
+    const valStatus = status || "NON-AKTIF";
+
+    // Kueri SQL bertingkat (Fallback jika struktur tabel di Railway bervariasi)
+    try {
+      await db.query(
+        "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, berlaku_mulai, status) VALUES (?, ?, ?, ?, ?)",
+        [perusahaan_id, valNama, valTarif, valTanggal, valStatus]
+      );
+    } catch (e1) {
+      try {
+        await db.query(
+          "INSERT INTO pajak (perusahaan_id, nama_pajak, tarif, status) VALUES (?, ?, ?, ?)",
+          [perusahaan_id, valNama, valTarif, valStatus]
+        );
+      } catch (e2) {
+        await db.query(
+          "INSERT INTO pajak (nama_pajak, tarif) VALUES (?, ?)",
+          [valNama, valTarif]
+        );
+      }
+    }
+
+    return res.json({ success: true, message: "Pengaturan pajak berhasil disimpan" });
   } catch (err) {
-    console.error("Gagal membuat pajak baru:", err.message);
+    console.error("Gagal simpan pajak:", err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// 3. Mengaktifkan Pajak PPN (Set status = 'AKTIF' untuk yang dipilih, sisanya 'NON-AKTIF')
+// 3. Mengaktifkan Pajak PPN (Set status = 'AKTIF')
 exports.setAktif = async (req, res) => {
   const conn = await db.getConnection();
   try {
@@ -58,13 +74,11 @@ exports.setAktif = async (req, res) => {
     const { id } = req.params;
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
 
-    // Matikan status semua pajak milik perusahaan
     await conn.query(
       "UPDATE pajak SET status = 'NON-AKTIF' WHERE (perusahaan_id = ? OR perusahaan_id IS NULL)",
       [perusahaan_id]
     );
 
-    // Aktifkan pajak yang dipilih
     await conn.query(
       "UPDATE pajak SET status = 'AKTIF' WHERE id = ? AND (perusahaan_id = ? OR perusahaan_id IS NULL)",
       [id, perusahaan_id]
@@ -80,7 +94,7 @@ exports.setAktif = async (req, res) => {
   }
 };
 
-// 4. Ambil 1 Pajak PPN Aktif untuk Frontend / Transaksi
+// 4. Ambil 1 Pajak PPN Aktif
 exports.getPPNAktif = async (req, res) => {
   try {
     const { perusahaan_id } = req.user || { perusahaan_id: 1 };
