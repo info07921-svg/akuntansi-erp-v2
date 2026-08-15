@@ -1,20 +1,31 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// Helper Presisi: Mengambil perusahaan_id asli dari JWT Token user yang sedang login
+// Helper Dinamis: Mengambil perusahaan_id murni dari user yang sedang login
 const getPerusahaanId = (req) => {
-  if (!req.user) return 14; // Fallback ke 14 sesuai ID Perusahaan Anda
+  if (!req.user) return null;
   
-  if (req.user.perusahaan_id) return parseInt(req.user.perusahaan_id, 10);
-  if (typeof req.user === "object" && req.user.id) return parseInt(req.user.id, 10);
+  // 1. Cek langsung jika perusahaan_id ada di objek user
+  if (req.user.perusahaan_id !== undefined && req.user.perusahaan_id !== null) {
+    return parseInt(req.user.perusahaan_id, 10);
+  }
   
-  return 14;
+  // 2. Cek jika id user dijadikan acuan perusahaan_id
+  if (req.user.id !== undefined && req.user.id !== null) {
+    return parseInt(req.user.id, 10);
+  }
+
+  return null;
 };
 
 // 1. Ambil semua data pajak HANYA milik perusahaan user login
 exports.getAll = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
+    if (!perusahaanId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: ID Perusahaan tidak ditemukan." });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM pengaturan_pajak WHERE perusahaan_id = ? ORDER BY id DESC",
       [perusahaanId]
@@ -26,12 +37,15 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// 2. Buat pengaturan pajak baru dengan perusahaan_id yang BENAR
+// 2. Buat pengaturan pajak baru dengan perusahaan_id asli user yang login
 exports.create = async (req, res) => {
   try {
-    const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
     const perusahaanId = getPerusahaanId(req);
+    if (!perusahaanId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: ID Perusahaan tidak ditemukan." });
+    }
 
+    const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
     const valNama = nama_pajak || "PPN";
     const valTarif = parseFloat(tarif || persentase || 11) || 11;
     
@@ -45,7 +59,6 @@ exports.create = async (req, res) => {
       }
     }
 
-    // Insert menggunakan perusahaan_id dinamis milik user login
     await db.query(
       "INSERT INTO pengaturan_pajak (perusahaan_id, nama_pajak, tarif, berlaku_mulai, aktif) VALUES (?, ?, ?, ?, 0)",
       [perusahaanId, valNama, valTarif, valTanggal]
@@ -58,13 +71,17 @@ exports.create = async (req, res) => {
   }
 };
 
-// 3. Mengaktifkan Pajak HANYA untuk perusahaan ini
+// 3. Mengaktifkan Pajak HANYA untuk perusahaan user yang login
 exports.setAktif = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
     const { id } = req.params;
     const perusahaanId = getPerusahaanId(req);
+
+    if (!perusahaanId) {
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
 
     // 1. Matikan semua pajak milik perusahaan ini
     await conn.query(
@@ -88,7 +105,7 @@ exports.setAktif = async (req, res) => {
   }
 };
 
-// 4. Ambil 1 Pajak PPN Aktif HANYA milik perusahaan ini
+// 4. Ambil 1 Pajak PPN Aktif HANYA milik perusahaan user yang login
 exports.getPPNAktif = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
