@@ -8,12 +8,6 @@ app.use(cors());
 app.use(express.json());
 
 // ======================
-// MIDDLEWARE AUTHENTICATION
-// ======================
-// Catatan: Sesuaikan path './middleware/authMiddleware' dengan nama file middleware token Anda (misal verifyToken/auth)
-const authMiddleware = require("./middleware/authMiddleware"); 
-
-// ======================
 // ROUTES IMPORTS
 // ======================
 const perusahaanRoutes = require("./routes/perusahaanRoutes");
@@ -56,22 +50,16 @@ app.use("/api/akun", akunRoutes);
 app.use("/api/jurnal", jurnalRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/export", exportRoutes);
-
-// PERBAIKAN: Lindungi rute pajak dengan authMiddleware agar req.user terisi otomatis dari Token JWT
-app.use("/api/pajak", authMiddleware, pajakRoutes);
-
+app.use("/api/pajak", pajakRoutes);
 app.use("/api/kas-modal", kasModalRoutes);
 
 // ======================
-// TEST API
+// TEST API & PORT
 // ======================
 app.get("/", (req, res) => {
   res.send("ERP API RUNNING");
 });
 
-// ======================
-// ERROR HANDLING & PORT
-// ======================
 const PORT = process.env.PORT || 3000;
 
 app.use((err, req, res, next) => {
