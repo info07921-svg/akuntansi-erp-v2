@@ -1,10 +1,11 @@
 // controllers/pajakController.js
 const db = require("../config/database");
 
-// Helper Ekstraksi Ketat: Tidak menggunakan default 1 agar tidak bocor ke user lain
+// Helper untuk mengekstrak perusahaan_id dari token JWT (req.user)
 const getPerusahaanId = (req) => {
   if (!req || !req.user) return null;
 
+  // Cek berbagai kemungkinan lokasi perusahaan_id dalam payload JWT
   const u = req.user.user || req.user.data || req.user;
 
   if (u.perusahaan_id !== undefined && u.perusahaan_id !== null) {
@@ -14,15 +15,15 @@ const getPerusahaanId = (req) => {
     return parseInt(u.id_perusahaan, 10);
   }
 
-  return null; // Mengembalikan null jika token tidak valid/kosong
+  return null;
 };
 
-// 1. Ambil semua data pajak HANYA milik perusahaan user login
+// 1. Ambil semua data pajak HANYA milik perusahaan user yang sedang login
 exports.getAll = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
-    
-    // Jika tidak ada perusahaanId valid, kembalikan array kosong (mencegah kebocoran data)
+
+    // Jika perusahaanId tidak terdeteksi dari token, kembalikan array kosong (mencegah kebocoran data perusahaan lain)
     if (!perusahaanId) {
       return res.json([]);
     }
@@ -38,12 +39,16 @@ exports.getAll = async (req, res) => {
   }
 };
 
-// 2. Buat pengaturan pajak baru dengan perusahaan_id asli user yang login
+// 2. Buat pengaturan pajak baru khusus untuk perusahaan user yang login
 exports.create = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
+
     if (!perusahaanId) {
-      return res.status(400).json({ success: false, error: "ID Perusahaan tidak ditemukan pada token login Anda." });
+      return res.status(401).json({ 
+        success: false, 
+        message: "Sesi login tidak valid. Silakan login kembali." 
+      });
     }
 
     const { nama_pajak, tarif, persentase, berlaku_mulai } = req.body;
@@ -81,14 +86,16 @@ exports.setAktif = async (req, res) => {
     const perusahaanId = getPerusahaanId(req);
 
     if (!perusahaanId) {
-      return res.status(400).json({ success: false, error: "ID Perusahaan tidak valid." });
+      return res.status(401).json({ success: false, message: "Unauthorized." });
     }
 
+    // 1. Nonaktifkan semua pajak milik perusahaan ini saja
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 0 WHERE perusahaan_id = ?",
       [perusahaanId]
     );
     
+    // 2. Aktifkan pajak pilihan HANYA untuk perusahaan ini saja
     await conn.query(
       "UPDATE pengaturan_pajak SET aktif = 1 WHERE id = ? AND perusahaan_id = ?",
       [id, perusahaanId]
@@ -108,6 +115,7 @@ exports.setAktif = async (req, res) => {
 exports.getPPNAktif = async (req, res) => {
   try {
     const perusahaanId = getPerusahaanId(req);
+
     if (!perusahaanId) {
       return res.json({ success: true, data: { tarif: 11, nama_pajak: "PPN 11%", aktif: 1 } });
     }
