@@ -65,10 +65,11 @@ exports.createPenjualan = async (req, res) => {
       totalLaba += (hargaJualAktif - hargaBeliAktif) * Number(item.qty);
     }
 
-    // PPN DIBUAT 0 (DIBONUS/DITUTUP SEMENTARA)
-    const tarifPPN = 0;
-    const totalPajak = 0;
-    const grandTotal = subtotal; // Grand total langsung mengambil nilai subtotal
+    // KODE BARU (Sudah mengirim perusahaan_id)
+// KODE BARU (GANTI DENGAN INI)
+const tarifPPN = 0;
+const totalPajak = 0;
+const grandTotal = subtotal;
 
     const isKredit = String(metode_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran) === "0";
     const numericStatusBayar = isKredit ? 0 : 1;
@@ -120,7 +121,7 @@ exports.createPenjualan = async (req, res) => {
       );
     }
 
-    // OTOMATISASI JURNAL DENGAN PENCARIAN FLEKSIBEL KODE AKUN
+    // OTOMATISASI JURNAL DENGAN PENCARIAN FLEKSIBELL KODE AKUN
     if (typeof createJurnal === "function") {
       const [rowsKas] = await conn.query(
         "SELECT id, kode_akun FROM akun WHERE (tipe = 'KAS' OR kode_akun LIKE '141%' OR kode_akun LIKE '111%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
