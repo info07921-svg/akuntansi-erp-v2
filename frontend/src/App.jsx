@@ -27,7 +27,7 @@ import TutupBuku from "./pages/TutupBuku";
 import JurnalManual from "./pages/JurnalManual";
 import TutupPeriode from "./pages/TutupPeriode";
 import ExportExcel from "./pages/ExportExcel";
-import Pajak from "./pages/Pajak";
+{/*import Pajak from "./pages/Pajak";*/}
 import Akun from "./pages/Akun";
 
 // 1. Pemetaan Judul Halaman berdasarkan Path URL
@@ -55,7 +55,7 @@ const pageTitles = {
   "/tutupbuku": "Tutup Buku Akhir Tahun",
   "/tutupperiode": "Tutup Periode Bulanan",
   "/export-excel": "Pusat Ekspor Excel",
-  "/pajak": "Pengaturan Pajak PPN",
+  {/*"/pajak": "Pengaturan Pajak PPN",*/}
 };
 
 // 2. Komponen Otomatis Pengubah Judul Tab Browser
@@ -355,7 +355,7 @@ function App() {
         />
 
         {/* PAJAK */}
-        <Route
+        {/*<Route
           path="/pajak"
           element={
             <ProtectedRoute>
@@ -364,7 +364,7 @@ function App() {
               </Layout>
             </ProtectedRoute>
           }
-        />
+        />*/}
 
         <Route
           path="*"
