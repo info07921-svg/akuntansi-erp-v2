@@ -468,6 +468,7 @@ exports.printInvoice = async (req, res) => {
     res.setHeader("Content-Disposition", `inline; filename="Invoice-${info.invoice}.pdf"`);
     doc.pipe(res);
 
+    // Header Perusahaan & Judul Invoice
     doc.rect(0, 0, 595.28, 12).fill("#1e293b");
     doc.font("Helvetica-Bold").fontSize(18).fillColor("#1e3a8a").text(namaPT.toUpperCase(), 40, 35);
     doc.font("Helvetica").fontSize(9).fillColor("#64748b").text(alamatPT, 40, 55, { width: 250 });
@@ -475,6 +476,7 @@ exports.printInvoice = async (req, res) => {
     
     doc.moveTo(40, 85).lineTo(555, 85).lineWidth(1).strokeColor("#e2e8f0").stroke();
 
+    // Informasi Customer & Metadata Invoice
     const topMetadataY = 105;
     doc.font("Helvetica-Bold").fontSize(9).fillColor("#334155").text("DITERBITKAN KEPADA:", 40, topMetadataY);
     doc.font("Helvetica").fillColor("#475569")
@@ -493,6 +495,7 @@ exports.printInvoice = async (req, res) => {
     drawMetaRow("Metode Bayar", textStatusPembayaran);
     drawMetaRow("Status Berkas", info.status_transaksi || "APPROVED");
 
+    // Header Tabel Items
     let currentY = 200;
     doc.rect(40, currentY, 515, 22).fill("#f1f5f9");
     doc.font("Helvetica-Bold").fontSize(9).fillColor("#1e293b");
@@ -503,17 +506,28 @@ exports.printInvoice = async (req, res) => {
     doc.text("TOTAL (IDR)", 470, currentY + 6, { align: "right", width: 80 });
     
     currentY += 22;
-    doc.font("Helvetica").fontSize(9).fillColor("#334155");
+
+    // Loop Item Produk (Perbaikan warna teks diatur di dalam loop)
     items.forEach((item, index) => {
-      if (index % 2 === 1) doc.rect(40, currentY, 515, 20).fill("#f8fafc");
+      // Menggambar background zebra striping untuk baris ganjil
+      if (index % 2 === 1) {
+        doc.rect(40, currentY, 515, 20).fill("#f8fafc");
+      }
+
+      // Kunci/Reset warna teks kembali ke abu-abu gelap agar tidak mengikuti warna fill background
+      doc.font("Helvetica").fontSize(9).fillColor("#334155");
+
+      // Cetak teks item
       doc.text(item.kode_barang || "-", 45, currentY + 5);
       doc.text(item.nama_barang, 120, currentY + 5);
       doc.text(`${item.qty}`, 340, currentY + 5, { align: "center", width: 40 });
       doc.text(`Rp ${Number(item.harga_jual).toLocaleString("id-ID")}`, 390, currentY + 5, { align: "right", width: 70 });
       doc.text(`Rp ${Number(item.subtotal || item.total_harga).toLocaleString("id-ID")}`, 470, currentY + 5, { align: "right", width: 80 });
+
       currentY += 20;
     });
 
+    // Ringkasan Subtotal, PPN, & Total Net
     currentY += 15;
     const drawSummaryRow = (label, value, isBold = false) => {
       doc.font(isBold ? "Helvetica-Bold" : "Helvetica").fillColor(isBold ? "#0f172a" : "#475569");
@@ -528,6 +542,7 @@ exports.printInvoice = async (req, res) => {
     currentY += 6;
     drawSummaryRow("TOTAL NET :", `Rp ${Number(info.total).toLocaleString("id-ID")}`, true);
 
+    // Footer Dokumen
     doc.font("Helvetica-Oblique").fontSize(8).fillColor("#94a3b8").text("Catatan: Dokumen ini sah dan diproses otomatis melalui ERP System.", 40, 720, { width: 320 });
     doc.font("Helvetica").fontSize(9).fillColor("#334155").text("Bagian Keuangan,", 440, 700, { align: "center", width: 115 });
     doc.end();
@@ -535,7 +550,6 @@ exports.printInvoice = async (req, res) => {
     if (!res.headersSent) res.status(500).send("Gagal memproses berkas PDF.");
   }
 };
-
 exports.exportPenjualanExcel = async (req, res) => {
   try {
     const { perusahaan_id } = req.user;
