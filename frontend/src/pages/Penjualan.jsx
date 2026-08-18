@@ -98,8 +98,8 @@ export default function Penjualan() {
   };
 
   const hitungSubtotal = () => detail.reduce((acc, curr) => acc + (curr.harga_jual * curr.qty), 0);
-  const hitungPPN = () => (hitungSubtotal() * tarifPPN) / 100;
-  const hitungTotalAkhir = () => hitungSubtotal() + hitungPPN();
+const hitungPPN = () => 0; // PPN diset 0
+const hitungTotalAkhir = () => hitungSubtotal(); // Total akhir hanya menghitung subtotal
 
   const formatRupiah = (num) => Number(num || 0).toLocaleString("id-ID");
 
@@ -152,7 +152,7 @@ const handleSubmitTransaksi = async (e) => {
             status_transaksi: "APPROVED",
             jatuh_tempo: form.jatuh_tempo || null,
             subtotal: hitungSubtotal(),
-            pajak: hitungPPN(),
+            /*pajak: hitungPPN(),*/
             total: hitungTotalAkhir()
           },
           detail: detail.map((d, idx) => ({
@@ -391,7 +391,7 @@ const handleSubmitTransaksi = async (e) => {
                   <span className="font-medium">Rp {formatRupiah(hitungSubtotal())}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "13px", color: "#dc2626", marginBottom: "8px" }}>
-                  <span>PPN Terutang ({tarifPPN}%):</span>
+                  {/*<span>PPN Terutang ({tarifPPN}%):</span>*/}
                   <span className="font-medium">Rp {formatRupiah(hitungPPN())}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", borderTop: "2px dashed #cbd5e1", paddingTop: "12px", fontSize: "16px", fontWeight: "800" }}>
@@ -474,7 +474,7 @@ const handleSubmitTransaksi = async (e) => {
 
               <div className="modal-financial-summary">
                 <div>Nilai Bruto: <span>Rp {formatRupiah(invoiceInfo.subtotal)}</span></div>
-                <div className="text-danger">Pajak PPN ({tarifPPN}%): <span>Rp {formatRupiah(invoiceInfo.pajak)}</span></div>
+                {/*<div className="text-danger">Pajak PPN ({tarifPPN}%): <span>Rp {formatRupiah(invoiceInfo.pajak)}</span></div>*/}
                 <div className="total-highlight">Total Faktur Akhir: <span className="text-success">Rp {formatRupiah(invoiceInfo.total)}</span></div>
               </div>
             </div>
