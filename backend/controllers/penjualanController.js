@@ -65,23 +65,10 @@ exports.createPenjualan = async (req, res) => {
       totalLaba += (hargaJualAktif - hargaBeliAktif) * Number(item.qty);
     }
 
-    // KODE BARU (Sudah mengirim perusahaan_id)
-let tarifPPN = 11;
-try {
-  const pajakAktif = await getPPNAktif(conn, perusahaan_id);
-  if (pajakAktif && pajakAktif.tarif !== undefined) {
-    tarifPPN = Number(pajakAktif.tarif);
-  }
-} catch (e) {
-  const [settingPajak] = await conn.query(
-    "SELECT tarif_ppn FROM setting_aplikasi WHERE perusahaan_id = ? LIMIT 1", 
-    [perusahaan_id]
-  );
-  if (settingPajak && settingPajak.length > 0) tarifPPN = Number(settingPajak[0].tarif_ppn);
-}
-
-    const totalPajak = (subtotal * tarifPPN) / 100;
-    const grandTotal = subtotal + totalPajak;
+    // PPN DIBUAT 0 (DIBONUS/DITUTUP SEMENTARA)
+    const tarifPPN = 0;
+    const totalPajak = 0;
+    const grandTotal = subtotal; // Grand total langsung mengambil nilai subtotal
 
     const isKredit = String(metode_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran) === "0";
     const numericStatusBayar = isKredit ? 0 : 1;
@@ -133,7 +120,7 @@ try {
       );
     }
 
-    // OTOMATISASI JURNAL DENGAN PENCARIAN FLEKSIBELL KODE AKUN
+    // OTOMATISASI JURNAL DENGAN PENCARIAN FLEKSIBEL KODE AKUN
     if (typeof createJurnal === "function") {
       const [rowsKas] = await conn.query(
         "SELECT id, kode_akun FROM akun WHERE (tipe = 'KAS' OR kode_akun LIKE '141%' OR kode_akun LIKE '111%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
