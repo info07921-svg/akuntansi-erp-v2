@@ -130,10 +130,10 @@ export default function Sidebar() {
         {/* UTILITAS & CLOSING */}
         <div className="menu-group">
           <h4>Utilitas & Penutupan</h4>
-          <NavLink to="/pajak">
+          {/*<NavLink to="/pajak">
             <FaPercentage />
             Pengaturan Pajak
-          </NavLink>    
+          </NavLink>*/}    
           <NavLink to="/export-excel">
             <FaFileExcel />
             Export Laporan Excel
