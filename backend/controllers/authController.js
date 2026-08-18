@@ -65,15 +65,17 @@ exports.login = async (req, res) => {
 // 2. REGISTER PERUSAHAAN BARU + AUTOMATIC DEFAULT COA SEEDING
 // ==========================================================================
 exports.register = async (req, res) => {
+  const { nama_perusahaan, nama, username, password } = req.body;
+
+  if (!nama_perusahaan || !nama || !username || !password) {
+    return res.status(400).json({ success: false, message: "Semua field pendaftaran wajib diisi." });
+  }
+
+  // PERBAIKAN BUG: validasi dipindahkan sebelum beginTransaction() agar koneksi tidak
+  // dikembalikan ke pool dalam kondisi transaksi masih terbuka saat validasi gagal.
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-
-    const { nama_perusahaan, nama, username, password } = req.body;
-
-    if (!nama_perusahaan || !nama || !username || !password) {
-      return res.status(400).json({ success: false, message: "Semua field pendaftaran wajib diisi." });
-    }
 
     // Cek apakah username sudah terpakai
     const [existUser] = await conn.query("SELECT id FROM users WHERE username = ?", [username]);

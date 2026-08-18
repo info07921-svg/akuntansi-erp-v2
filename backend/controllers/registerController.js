@@ -3,29 +3,38 @@ const db = require("../config/database");
 const { seedDefaultAccounts } = require("../utils/accountSeeder"); // <-- 1. Import helper seeder baru
 
 exports.register = async (req, res) => {
+  const {
+    nama_perusahaan,
+    username,
+    password
+  } = req.body;
+  // PERBAIKAN BUG: kolom pada tabel `users` bernama `nama` (lihat authController.js
+  // yang membaca `user.nama` saat login), bukan `nama_lengkap`. Sebelumnya field ini
+  // disimpan sebagai `nama_lengkap`, sehingga setelah registrasi & login nama user
+  // selalu kosong/undefined (atau query akan gagal jika kolom `nama_lengkap` tidak ada).
+  // Menerima kedua nama field dari body agar kompatibel dengan form lama maupun baru.
+  const nama = req.body.nama || req.body.nama_lengkap;
+
+  if (
+    !nama_perusahaan ||
+    !nama ||
+    !username ||
+    !password
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Semua field wajib diisi"
+    });
+  }
+
+  // PERBAIKAN BUG: validasi input dipindahkan ke atas, sebelum membuka transaksi DB.
+  // Sebelumnya, jika validasi gagal setelah beginTransaction() dipanggil, fungsi langsung
+  // return tanpa commit/rollback -> koneksi dikembalikan ke pool dalam kondisi transaksi
+  // masih "menggantung", berpotensi menyebabkan locking/kebocoran koneksi di production.
   const conn = await db.getConnection();
 
   try {
     await conn.beginTransaction();
-
-    const {
-      nama_perusahaan,
-      nama_lengkap,
-      username,
-      password
-    } = req.body;
-
-    if (
-      !nama_perusahaan ||
-      !nama_lengkap ||
-      !username ||
-      !password
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Semua field wajib diisi"
-      });
-    }
 
     const [cekUser] = await conn.query(
       "SELECT id FROM users WHERE username=?",
@@ -71,7 +80,7 @@ exports.register = async (req, res) => {
         perusahaan_id,
         username,
         password,
-        nama_lengkap,
+        nama,
         role,
         status
       )
@@ -81,7 +90,7 @@ exports.register = async (req, res) => {
         perusahaan_id,
         username,
         hashPassword,
-        nama_lengkap,
+        nama,
         "OWNER",
         "AKTIF"
       ]

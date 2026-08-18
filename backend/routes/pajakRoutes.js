@@ -2,10 +2,14 @@
 const express = require("express");
 const router = express.Router();
 const pajakController = require("../controllers/pajakController");
+const { verifyToken } = require("../middleware/authMiddleware");
 
-router.get("/", pajakController.getAll);
-router.post("/", pajakController.create);
-router.get("/aktif", pajakController.getAktif);
-router.put("/aktifkan/:id", pajakController.setAktif); // Rute baru
+// PERBAIKAN BUG: rute ini sebelumnya tidak dilindungi verifyToken sama sekali,
+// sehingga siapa pun (tanpa login) bisa membaca/mengubah pengaturan pajak, dan
+// req.user (dibutuhkan untuk multi-tenant scoping) selalu undefined.
+router.get("/", verifyToken, pajakController.getAll);
+router.post("/", verifyToken, pajakController.create);
+router.get("/aktif", verifyToken, pajakController.getAktif);
+router.put("/aktifkan/:id", verifyToken, pajakController.setAktif); // Rute baru
 
 module.exports = router;

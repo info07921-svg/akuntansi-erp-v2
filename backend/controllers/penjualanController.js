@@ -65,21 +65,25 @@ exports.createPenjualan = async (req, res) => {
       totalLaba += (hargaJualAktif - hargaBeliAktif) * Number(item.qty);
     }
 
-    // KODE BARU (Sudah mengirim perusahaan_id)
-// KODE BARU (GANTI DENGAN INI)
-const tarifPPN = 0;
-const totalPajak = 0;
-const grandTotal = subtotal;
+    // Ambil tarif PPN aktif milik perusahaan ini (dengan fallback 11% jika belum diatur)
+    const ppnAktif = await getPPNAktif(conn, perusahaan_id);
+    const tarifPPN = Number(ppnAktif?.tarif ?? 11);
+    const totalPajak = Math.round(subtotal * (tarifPPN / 100) * 100) / 100;
+    const grandTotal = subtotal + totalPajak;
 
-    const isKredit = String(metode_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran) === "0";
-    const numericStatusBayar = isKredit ? 0 : 1;
+    const isKredit = String(metode_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "KREDIT" || String(status_pembayaran).toUpperCase() === "BELUM_LUNAS";
+    // PERBAIKAN: kolom `status_pembayaran` di tabel `penjualan` bertipe VARCHAR(100),
+    // bukan angka. Sebelumnya kode ini menyimpan 0/1 (angka) ke kolom teks tersebut,
+    // sehingga nilainya tidak konsisten dengan konvensi status di tabel lain
+    // (mis. `piutang.status` = 'BELUM_LUNAS'/'LUNAS'/'DIBATALKAN'). Sekarang disamakan.
+    const stringStatusBayar = isKredit ? "BELUM_LUNAS" : "LUNAS";
     const stringMetodeBayar = isKredit ? "KREDIT" : (metode_pembayaran || "TUNAI");
     const cleanCustomerId = (customer_id && customer_id !== "0" && customer_id !== "") ? customer_id : null;
 
     const [resultPenjualan] = await conn.query(
       `INSERT INTO penjualan (perusahaan_id, invoice, customer_id, tanggal, dpp, subtotal, ppn_persen, ppn, total, metode_pembayaran, status_pembayaran, jatuh_tempo, status_transaksi) 
        VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, 'APPROVED')`,
-      [perusahaan_id, invoice, cleanCustomerId, subtotal, subtotal, tarifPPN, totalPajak, grandTotal, stringMetodeBayar, numericStatusBayar, (isKredit ? jatuh_tempo : null)]
+      [perusahaan_id, invoice, cleanCustomerId, subtotal, subtotal, tarifPPN, totalPajak, grandTotal, stringMetodeBayar, stringStatusBayar, (isKredit ? jatuh_tempo : null)]
     );
  
     const penjualanId = resultPenjualan.insertId;
@@ -152,6 +156,7 @@ const grandTotal = subtotal;
         ref_tipe: "PENJUALAN",
         ref_id: penjualanId,
         keterangan: `Penjualan Barang Dagang No. ${invoice}`,
+        perusahaan_id,
         details: akunJurnalRows
       });
     }
@@ -290,7 +295,7 @@ exports.getDetailPenjualan = async (req, res) => {
 
     const info = header[0];
     let catatanPiutang = null;
-    const isKredit = Number(info.status_pembayaran) === 0 || String(info.metode_pembayaran).toUpperCase() === "KREDIT";
+    const isKredit = String(info.status_pembayaran).toUpperCase() === "BELUM_LUNAS" || String(info.metode_pembayaran).toUpperCase() === "KREDIT";
     const textStatusPembayaran = isKredit ? "KREDIT" : "LUNAS";
 
     if (isKredit) {
@@ -329,13 +334,21 @@ exports.bayarPiutang = async (req, res) => {
     await conn.beginTransaction();
     const { id } = req.params;
     const { jumlah_bayar, metode_pembayaran, catatan } = req.body;
-    const { id: user_id } = req.user || { id: 1 };
+    const { id: user_id, perusahaan_id } = req.user || { id: 1 };
 
     if (!jumlah_bayar || Number(jumlah_bayar) <= 0) {
       return res.status(400).json({ success: false, error: "Jumlah pembayaran harus lebih besar dari 0" });
     }
 
-    const [piutang] = await conn.query("SELECT * FROM piutang WHERE id = ?", [id]);
+    // PERBAIKAN BUG KEAMANAN: pastikan piutang ini benar-benar milik perusahaan yang sedang login
+    // (sebelumnya query ini tidak memfilter perusahaan_id sama sekali, sehingga user dari
+    // perusahaan lain berpotensi membayar/mengubah piutang milik perusahaan lain)
+    const [piutang] = await conn.query(
+      `SELECT pi.* FROM piutang pi
+       JOIN penjualan pe ON pe.id = pi.penjualan_id
+       WHERE pi.id = ? AND pe.perusahaan_id = ?`,
+      [id, perusahaan_id]
+    );
     if (piutang.length === 0) {
       return res.status(404).json({ success: false, error: "Data rekam piutang tidak ditemukan." });
     }
@@ -362,21 +375,35 @@ exports.bayarPiutang = async (req, res) => {
     );
 
     if (typeof createJurnal === "function") {
+      // PERBAIKAN BUG: akun_id sebelumnya di-hardcode (1 dan 3), padahal ID akun
+      // berbeda-beda per perusahaan (multi-tenant). Sekarang dicari secara dinamis
+      // sama seperti pada createPenjualan.
+      const [rowsKas] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (tipe = 'KAS' OR kode_akun LIKE '141%' OR kode_akun LIKE '111%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
+        [perusahaan_id]);
+      const [rowsPiutang] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (nama_akun LIKE '%Piutang%' OR kode_akun LIKE '1411%' OR kode_akun LIKE '1112%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
+        [perusahaan_id]);
+
+      const akunKas = rowsKas[0] || { id: 1, kode_akun: "141001" };
+      const akunPiutang = rowsPiutang[0] || { id: 3, kode_akun: "141101" };
+
       await createJurnal(conn, {
         tanggal: new Date(),
         ref_tipe: "PEMBAYARAN_PIUTANG",
         ref_id: id,
         keterangan: `Pembayaran Piutang #${id} - Ket: ${catatan || 'Tanpa Catatan'}`,
+        perusahaan_id,
         details: [
-          { akun_id: 1, kode_akun: "141001", debit: Number(jumlah_bayar), kredit: 0 },
-          { akun_id: 3, kode_akun: "141101", debit: 0, kredit: Number(jumlah_bayar) }
+          { akun_id: akunKas.id, kode_akun: akunKas.kode_akun, debit: Number(jumlah_bayar), kredit: 0 },
+          { akun_id: akunPiutang.id, kode_akun: akunPiutang.kode_akun, debit: 0, kredit: Number(jumlah_bayar) }
         ]
       });
     }
 
     if (statusPiutang === "LUNAS") {
       await conn.query(
-        `UPDATE penjualan SET status_pembayaran = 1, tanggal_pelunasan = NOW() WHERE id = ?`,
+        `UPDATE penjualan SET status_pembayaran = 'LUNAS', tanggal_pelunasan = NOW() WHERE id = ?`,
         [dataPiutang.penjualan_id]
       );
     }
@@ -438,7 +465,7 @@ exports.printInvoice = async (req, res) => {
     if (header.length === 0) return res.status(404).send("Dokumen Invoice Tidak Ditemukan.");
     const info = header[0];
 
-    const isKredit = Number(info.status_pembayaran) === 0 || String(info.metode_pembayaran).toUpperCase() === "KREDIT";
+    const isKredit = String(info.status_pembayaran).toUpperCase() === "BELUM_LUNAS" || String(info.metode_pembayaran).toUpperCase() === "KREDIT";
     const textStatusPembayaran = isKredit ? "KREDIT" : "LUNAS";
     const subtotalNilai = info.subtotal || info.dpp || info.total;
 
@@ -557,7 +584,7 @@ exports.exportPenjualanExcel = async (req, res) => {
       { header: "Tanggal", key: "tanggal", width: 18 },
       { header: "Nama Customer", key: "nama_customer", width: 25 },
       { header: "Metode Pembayaran", key: "metode_pembayaran", width: 18 },
-      { header: "Status (0:Kredit, 1:Lunas)", key: "status_pembayaran", width: 22 },
+      { header: "Status Pembayaran", key: "status_pembayaran", width: 22 },
       { header: "Subtotal", key: "subtotal", width: 15 },
       { header: "PPN", key: "ppn", width: 15 },
       { header: "Total Omset Net", key: "total", width: 18 }

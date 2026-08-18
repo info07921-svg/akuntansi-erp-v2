@@ -65,6 +65,44 @@ exports.createBarangMasuk = async (req, res) => {
       );
     }
 
+    // PERBAIKAN BUG: Sebelumnya barang masuk (pembelian) TIDAK PERNAH membuat posting jurnal,
+    // padahal helper createJurnal sudah di-import. Akibatnya Neraca & Laporan Keuangan tidak
+    // pernah mencatat kenaikan Persediaan maupun Hutang/Kas dari transaksi pembelian.
+    if (typeof createJurnal === "function" && total_belanja > 0) {
+      const [rowsPersediaan] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (nama_akun LIKE '%Persediaan%' OR kode_akun LIKE '%1201%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
+        [perusahaan_id]);
+      const [rowsKas] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (tipe = 'KAS' OR kode_akun LIKE '141%' OR kode_akun LIKE '111%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
+        [perusahaan_id]);
+      const [rowsHutang] = await conn.query(
+        "SELECT id, kode_akun FROM akun WHERE (nama_akun LIKE '%Hutang%' OR kode_akun LIKE '%2001%') AND (perusahaan_id = ? OR perusahaan_id IS NULL) LIMIT 1",
+        [perusahaan_id]);
+
+      const akunPersediaan = rowsPersediaan[0] || { id: 1 };
+      const akunKas = rowsKas[0] || { id: 2 };
+      const akunHutang = rowsHutang[0] || { id: 3 };
+
+      const detailsJurnal = numericStatusBayar === 0
+        ? [
+          { akun_id: akunPersediaan.id, debit: total_belanja, kredit: 0 },
+          { akun_id: akunHutang.id, debit: 0, kredit: total_belanja }
+        ]
+        : [
+          { akun_id: akunPersediaan.id, debit: total_belanja, kredit: 0 },
+          { akun_id: akunKas.id, debit: 0, kredit: total_belanja }
+        ];
+
+      await createJurnal(conn, {
+        tanggal: new Date(),
+        ref_tipe: "BARANG_MASUK",
+        ref_id: barangMasukId,
+        keterangan: `Pembelian Barang Dagang No. ${invoice}`,
+        perusahaan_id,
+        details: detailsJurnal
+      });
+    }
+
     await conn.commit();
     return res.status(201).json({
       success: true,
